@@ -249,6 +249,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		ctx = context.WithValue(ctx, httpclient.ContextKeyHeader{}, ctxHeader)
 	}
 
+	downstream_padding := r.Header.Get("Padding")
+	if downstream_padding != "" {
+		ctxHeader := make(http.Header)
+		ctxHeader.Add("Padding", downstream_padding)
+		ctx = context.WithValue(ctx, httpclient.ContextKeyHeader{}, ctxHeader)
+	}
+
 	if r.Method == http.MethodConnect {
 
 		if r.ProtoMajor == 2 {
@@ -264,7 +271,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 		targetConn, err := h.dialContextCheckACL(ctx, "tcp", hostPort)
 		if err != nil {
-			return err
+			if strings.HasPrefix(err.Error(), "Padding: ") {
+				w.Header().Set("Padding", err.Error()[len("Padding: "):])
+			} else {
+				return err
+			}
 		}
 		if targetConn == nil {
 			// safest to check both error and targetConn afterwards, in case fp.dial (potentially unstable
@@ -429,6 +440,9 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 		// if upstreaming -- do not resolve locally nor check acl
 		conn, err = h.dialContext(ctx, network, hostPort)
 		if err != nil {
+			if strings.HasPrefix(err.Error(), "Padding: ") {
+				return conn, err
+			}
 			// return conn, &proxyError{S: err.Error(), Code: http.StatusBadGateway}
 			return conn, caddyhttp.Error(http.StatusBadGateway, err)
 		}

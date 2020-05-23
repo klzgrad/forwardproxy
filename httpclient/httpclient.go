@@ -164,6 +164,10 @@ func (c *HTTPConnectDialer) DialContext(ctx context.Context, network, address st
 			rawConn.Close()
 			return nil, errors.New("Proxy responded with non 200 code: " + resp.Status)
 		}
+		padding := resp.Header.Get("Padding")
+		if padding != "" {
+			return rawConn, errors.New("Padding: " + padding)
+		}
 		return rawConn, nil
 	}
 
