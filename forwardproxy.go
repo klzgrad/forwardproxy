@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
@@ -27,7 +28,8 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
+	"math"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -230,6 +232,18 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	return nil
 }
 
+func randUint64() uint64 {
+	return randUint64N(math.MaxUint64)
+}
+
+func randUint64N(max uint64) uint64 {
+	rnd, _ := rand.Int(rand.Reader, new(big.Int).SetUint64(max))
+	if rnd == nil {
+		return 0
+	}
+	return rnd.Uint64()
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	// start by splitting the request host and port
 	reqHost, _, err := net.SplitHostPort(r.Host)
@@ -294,12 +308,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 				fmt.Errorf("ResponseWriter doesn't implement http.Flusher"))
 		}
 		// Creates a padding of [30, 30+32)
-		paddingLen := rand.Intn(32) + 30
+		paddingLen := int(30 + randUint64N(32))
 		padding := make([]byte, paddingLen)
-		bits := rand.Uint64()
+		bits := randUint64()
 		for i := 0; i < 16; i++ {
 			// Codes that won't be Huffman coded.
-			padding[i] = "!#$()+<>?@[]^`{}"[bits & 15]
+			padding[i] = "!#$()+<>?@[]^`{}"[bits&15]
 			bits >>= 4
 		}
 		for i := 16; i < paddingLen; i++ {
@@ -550,7 +564,7 @@ func (h Handler) portIsAllowed(port string) bool {
 func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 	const hiddenPage = `<html>
 <head>
-  <title>Hidden Proxy Page</title>
+	<title>Hidden Proxy Page</title>
 </head>
 <body>
 <h1>Hidden Proxy Page!</h1>
@@ -598,7 +612,8 @@ func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
 	}
 	// Since we hijacked the connection, we lost the ability to write and flush headers via w.
 	// Let's handcraft the response and send it manually.
-	res := &http.Response{StatusCode: http.StatusOK,
+	res := &http.Response{
+		StatusCode: http.StatusOK,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
@@ -616,9 +631,9 @@ func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
 }
 
 const (
-	NoPadding = 0
-	AddPadding = 1
-	RemovePadding = 2
+	NoPadding        = 0
+	AddPadding       = 1
+	RemovePadding    = 2
 	NumFirstPaddings = 8
 )
 
@@ -637,7 +652,7 @@ func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Wri
 		}
 		return _err
 	}
-	if (padding) {
+	if padding {
 		go stream(target, clientReader, RemovePadding)
 		return stream(clientWriter, target, AddPadding)
 	} else {
@@ -659,9 +674,9 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (
 	for {
 		var nr int
 		var er error
-		if (paddingType == AddPadding && numPadding < NumFirstPaddings) {
+		if paddingType == AddPadding && numPadding < NumFirstPaddings {
 			numPadding++
-			paddingSize := rand.Intn(256)
+			paddingSize := int(randUint64N(256))
 			maxRead := 65536 - 3 - paddingSize
 			nr, er = src.Read(buf[3:maxRead])
 			if nr > 0 {
@@ -669,15 +684,15 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (
 				buf[1] = byte(nr % 256)
 				buf[2] = byte(paddingSize)
 				for i := 0; i < paddingSize; i++ {
-					buf[3 + nr + i] = 0
+					buf[3+nr+i] = 0
 				}
 				nr += 3 + paddingSize
 			}
-		} else if (paddingType == RemovePadding && numPadding < NumFirstPaddings) {
+		} else if paddingType == RemovePadding && numPadding < NumFirstPaddings {
 			numPadding++
 			nr, er = io.ReadFull(src, buf[0:3])
 			if nr > 0 {
-				nr = int(buf[0]) * 256 + int(buf[1])
+				nr = int(buf[0])*256 + int(buf[1])
 				paddingSize := int(buf[2])
 				nr, er = io.ReadFull(src, buf[0:nr])
 				if nr > 0 {

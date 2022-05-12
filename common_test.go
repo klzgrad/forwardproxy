@@ -24,19 +24,21 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 )
 
-var credentialsEmpty = ""
-var credentialsCorrectPlain = "test:pass"
-var credentialsCorrect = "Basic dGVzdDpwYXNz"                                 // test:pass
-var credentialsUpstreamCorrect = "basic dXBzdHJlYW10ZXN0OnVwc3RyZWFtcGFzcw==" // upstreamtest:upstreampass
-var credentialsWrong = []string{
-	"",
-	"\"\"",
-	"Basic dzp3",
-	"Basic \"\"",
-	"Foo bar",
-	"Tssssssss",
-	"Basic dpz3 asp",
-}
+var (
+	credentialsEmpty           = ""
+	credentialsCorrectPlain    = "test:pass"
+	credentialsCorrect         = "Basic dGVzdDpwYXNz"                         // test:pass
+	credentialsUpstreamCorrect = "basic dXBzdHJlYW10ZXN0OnVwc3RyZWFtcGFzcw==" // upstreamtest:upstreampass
+	credentialsWrong           = []string{
+		"",
+		"\"\"",
+		"Basic dzp3",
+		"Basic \"\"",
+		"Foo bar",
+		"Tssssssss",
+		"Basic dpz3 asp",
+	}
+)
 
 /*
 Test naming: Test{httpVer}Proxy{Method}{Auth}{Credentials}{httpVer}
@@ -44,17 +46,22 @@ GET/CONNECT -- get gets, connect connects and gets
 Auth/NoAuth
 Empty/Correct/Wrong -- tries different credentials
 */
-var testResources = []string{"/", "/pic.png"}
-var testHTTPProxyVersions = []string{"HTTP/2.0", "HTTP/1.1"}
-var testHTTPTargetVersions = []string{"HTTP/1.1"}
-var httpVersionToALPN = map[string]string{
-	"HTTP/1.1": "http/1.1",
-	"HTTP/2.0": "h2",
-}
 
-var blacklistedDomain = "google-public-dns-a.google.com" // supposed to ever resolve to one of 2 IP addresses below
-var blacklistedIPv4 = "8.8.8.8"
-var blacklistedIPv6 = "2001:4860:4860::8888"
+var (
+	testResources          = []string{"/", "/pic.png"}
+	testHTTPProxyVersions  = []string{"HTTP/2.0", "HTTP/1.1"}
+	testHTTPTargetVersions = []string{"HTTP/1.1"}
+	httpVersionToALPN      = map[string]string{
+		"HTTP/1.1": "http/1.1",
+		"HTTP/2.0": "h2",
+	}
+)
+
+var (
+	blacklistedDomain = "google-public-dns-a.google.com" // supposed to ever resolve to one of 2 IP addresses below
+	blacklistedIPv4   = "8.8.8.8"
+	blacklistedIPv6   = "2001:4860:4860::8888"
+)
 
 type caddyTestServer struct {
 	addr string

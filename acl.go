@@ -37,7 +37,6 @@ func (a *aclIPRule) tryMatch(ip net.IP, domain string) aclDecision {
 		return aclDecisionAllow
 	}
 	return aclDecisionDeny
-
 }
 
 type aclDomainRule struct {
