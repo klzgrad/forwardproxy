@@ -19,14 +19,14 @@ jobs:
         run: ~/go/bin/xcaddy build --with github.com/caddyserver/forwardproxy@caddy2=github.com/klzgrad/forwardproxy@naive 
       - name: Check files
         run: file ./caddy
-#      - name: Upload binaries to release
-#        uses: svenstaro/upload-release-action@v2
-#        with:
-#          repo_token: ${{ secrets.GITHUB_TOKEN }}
-#          file: ./caddy
-#          asset_name: mything
-#          tag: ${{ github.ref }}
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GH_TOKEN }}
+          file: ./caddy
+          asset_name: caddy-naive-linux-amd64
+#          tag: ${{  }}
 #          overwrite: true
-#          body: "This is my release text"
+          body: "This is my release text"
 
 
