@@ -13,13 +13,20 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.18.1
-      - name: Initialization environment
-        run: sudo apt install -y ca-certificates openssl
       - name: Install xcaddy 
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
       - name: Build caddy
-        run: ~/go/bin/xcaddy build --with github.com/caddyserver/forwardproxy@caddy2=github.com/klzgrad/forwardproxy@naive
-      - name: echo eval
-        run: echo ${GITHUB_WORKSPACE}
+        run: ~/go/bin/xcaddy build --with github.com/caddyserver/forwardproxy@caddy2=github.com/klzgrad/forwardproxy@naive 
+      - name: Check files
+        run: file ./caddy
+#      - name: Upload binaries to release
+#        uses: svenstaro/upload-release-action@v2
+#        with:
+#          repo_token: ${{ secrets.GITHUB_TOKEN }}
+#          file: ./caddy
+#          asset_name: mything
+#          tag: ${{ github.ref }}
+#          overwrite: true
+#          body: "This is my release text"
 
 
