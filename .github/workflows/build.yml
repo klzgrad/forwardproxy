@@ -14,7 +14,7 @@ jobs:
         with:
           go-version: 1.18.1
       - name: Initialization environment
-        run: apt install -y ca-certificates openssl
+        run: sudo apt install -y ca-certificates openssl
       - name: Install xcaddy 
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
       - name: Build caddy
