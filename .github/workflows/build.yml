@@ -5,7 +5,7 @@ on:
     branches:
       - naive
 
-Jobs:
+jobs:
   build_caddy_with_naive:
     runs-on: ubuntu-22.04
     steps:
