@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -50,7 +49,7 @@ func init() {
 
 	// Used for generating padding lengths. Not needed to be cryptographically secure.
 	// Does not care about double seeding.
-	rand.Seed(time.Now().UnixNano())
+	rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
 // Handler implements a forward proxy.
@@ -292,11 +291,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 
 		// HTTP CONNECT Fast Open. We merely close the connection if Open fails.
-		wFlusher, ok := w.(http.Flusher)
-		if !ok {
-			return caddyhttp.Error(http.StatusInternalServerError,
-				fmt.Errorf("ResponseWriter doesn't implement http.Flusher"))
-		}
+		rc := http.NewResponseController(w)
 		// Creates a padding of [30, 30+32)
 		paddingLen := rand.Intn(32) + 30
 		padding := make([]byte, paddingLen)
@@ -311,7 +306,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 		w.Header().Set("Padding", string(padding))
 		w.WriteHeader(http.StatusOK)
-		wFlusher.Flush()
+		rc.Flush()
 
 		hostPort := r.URL.Host
 		if hostPort == "" {
@@ -375,13 +370,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			// make sure request is idempotent and could be retried by saving the Body
 			// None of those methods are supposed to have body,
 			// but we still need to copy the r.Body, even if it's empty
-			rBodyBuf, err := ioutil.ReadAll(r.Body)
+			rBodyBuf, err := io.ReadAll(r.Body)
 			if err != nil {
 				return caddyhttp.Error(http.StatusBadRequest,
 					fmt.Errorf("failed to read request body: %v", err))
 			}
 			r.GetBody = func() (io.ReadCloser, error) {
-				return ioutil.NopCloser(bytes.NewReader(rBodyBuf)), nil
+				return io.NopCloser(bytes.NewReader(rBodyBuf)), nil
 			}
 			r.Body, _ = r.GetBody()
 		}
@@ -578,11 +573,8 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 // Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
 // and hijacked connection.
 func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		return caddyhttp.Error(http.StatusInternalServerError,
-			fmt.Errorf("ResponseWriter does not implement http.Hijacker"))
-	}
+	hijacker := http.NewResponseController(w)
+
 	clientConn, bufReader, err := hijacker.Hijack()
 	if err != nil {
 		return caddyhttp.Error(http.StatusInternalServerError,
