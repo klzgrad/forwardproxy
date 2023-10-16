@@ -306,7 +306,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 		w.Header().Set("Padding", string(padding))
 		w.WriteHeader(http.StatusOK)
-		rc.Flush()
+		err := rc.Flush()
+		if err != nil {
+			return caddyhttp.Error(http.StatusInternalServerError, fmt.Errorf(err.Error()))
+		}
 
 		hostPort := r.URL.Host
 		if hostPort == "" {
