@@ -290,8 +290,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			}
 		}
 
-		// HTTP CONNECT Fast Open. We merely close the connection if Open fails.
-		rc := http.NewResponseController(w)
 		// Creates a padding of [30, 30+32)
 		paddingLen := rand.Intn(32) + 30
 		padding := make([]byte, paddingLen)
@@ -306,7 +304,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 		w.Header().Set("Padding", string(padding))
 		w.WriteHeader(http.StatusOK)
-		err := rc.Flush()
+		err := http.NewResponseController(w).Flush()
 		if err != nil {
 			return caddyhttp.Error(http.StatusInternalServerError, fmt.Errorf(err.Error()))
 		}
@@ -576,9 +574,7 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 // Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
 // and hijacked connection.
 func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
-	hijacker := http.NewResponseController(w)
-
-	clientConn, bufReader, err := hijacker.Hijack()
+	clientConn, bufReader, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		return caddyhttp.Error(http.StatusInternalServerError,
 			fmt.Errorf("hijack failed: %v", err))
@@ -653,7 +649,8 @@ type closeWriter interface {
 // If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
 // Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
 func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (written int64, err error) {
-	flusher, hasFlusher := dst.(http.Flusher)
+	rw, _ := dst.(http.ResponseWriter)
+	rc := http.NewResponseController(rw)
 	var numPadding int
 	for {
 		var nr int
@@ -689,9 +686,7 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (
 		}
 		if nr > 0 {
 			nw, ew := dst.Write(buf[0:nr])
-			if hasFlusher {
-				flusher.Flush()
-			}
+			rc.Flush()
 			if nw > 0 {
 				written += int64(nw)
 			}
