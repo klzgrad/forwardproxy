@@ -19,7 +19,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -75,7 +74,7 @@ func connectAndGetViaProxy(targetHost, resource, proxyAddr, httpTargetVer, proxy
 		req.ProtoMajor = 2
 		req.ProtoMinor = 0
 		pr, pw := io.Pipe()
-		req.Body = ioutil.NopCloser(pr)
+		req.Body = io.NopCloser(pr)
 		t := http2.Transport{}
 		clientConn, err := t.NewClientConn(proxyConn)
 		if err != nil {
@@ -89,7 +88,7 @@ func connectAndGetViaProxy(targetHost, resource, proxyAddr, httpTargetVer, proxy
 	case "HTTP/1.1":
 		req.ProtoMajor = 1
 		req.ProtoMinor = 1
-		req.Write(proxyConn)
+		req.Write(proxyConn) // nolint:errcheck // we don't care about the error here
 		resp, err = http.ReadResponse(bufio.NewReader(proxyConn), req)
 		if err != nil {
 			return resp, err

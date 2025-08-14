@@ -26,18 +26,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+<<<<<<< HEAD
 	"io/ioutil"
+=======
+>>>>>>> upstream/naive
 	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
-	"github.com/caddyserver/caddy/v2"
+	caddy "github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/caddyserver/forwardproxy/httpclient"
@@ -62,8 +67,11 @@ type Handler struct {
 	// If true, the Forwarded header will not be augmented with your IP address.
 	HideIP bool `json:"hide_ip,omitempty"`
 
-	// If true, the Via heaeder will not be added.
+	// If true, the Via header will not be added.
 	HideVia bool `json:"hide_via,omitempty"`
+
+	// If true, the strict check preventing HTTP upstreams will be disabled.
+	DisableInsecureUpstreamsCheck bool `json:"disable_insecure_upstreams_check,omitempty"`
 
 	// Host(s) (and ports) of the proxy. When you configure a client,
 	// you will give it the host (and port) of the proxy to use.
@@ -74,6 +82,16 @@ type Handler struct {
 
 	// How long to wait before timing out initial TCP connections.
 	DialTimeout caddy.Duration `json:"dial_timeout,omitempty"`
+
+	// Maximum number of idle connections to keep open, globally.
+	// Default: 50. Set to -1 for no limit.
+	// See https://pkg.go.dev/net/http#Transport.MaxIdleConns
+	MaxIdleConns int `json:"max_idle_conns,omitempty"`
+
+	// Maximum number of idle connections to keep open per host.
+	// Default: 0, which uses Go's default of 2.
+	// See https://pkg.go.dev/net/http#Transport.MaxIdleConnsPerHost
+	MaxIdleConnsPerHost int `json:"max_idle_conns_per_host,omitempty"`
 
 	// Optionally configure an upstream proxy to use.
 	Upstream string `json:"upstream,omitempty"`
@@ -93,10 +111,7 @@ type Handler struct {
 	aclRules []aclRule
 
 	// TODO: temporary/deprecated - we should try to reuse existing authentication modules instead!
-	BasicauthUser   string `json:"auth_user_deprecated,omitempty"`
-	BasicauthPass   string `json:"auth_pass_deprecated,omitempty"`
-	authRequired    bool
-	authCredentials [][]byte // slice with base64-encoded credentials
+	AuthCredentials [][]byte `json:"auth_credentials,omitempty"` // slice with base64-encoded credentials
 }
 
 // CaddyModule returns the Caddy module information.
@@ -115,19 +130,22 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		h.DialTimeout = caddy.Duration(30 * time.Second)
 	}
 
-	h.httpTransport = &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
-		MaxIdleConns:        50,
-		IdleConnTimeout:     60 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
+	// Default to 50 max idle connections if not specified,
+	// or no limit if -1 is specified.
+	maxIdleConns := h.MaxIdleConns
+	if maxIdleConns == 0 {
+		maxIdleConns = 50
+	}
+	if maxIdleConns < 0 {
+		maxIdleConns = 0
 	}
 
-	// TODO: temporary, in an effort to get the tests to pass
-	if h.BasicauthUser != "" && h.BasicauthPass != "" {
-		basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(h.BasicauthUser)+1+len(h.BasicauthPass)))
-		base64.StdEncoding.Encode(basicAuthBuf, []byte(h.BasicauthUser+":"+h.BasicauthPass))
-		h.authRequired = true
-		h.authCredentials = [][]byte{basicAuthBuf}
+	h.httpTransport = &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		MaxIdleConns:        maxIdleConns,
+		MaxIdleConnsPerHost: h.MaxIdleConnsPerHost,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
 	}
 
 	// access control lists
@@ -157,7 +175,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	h.aclRules = append(h.aclRules, &aclAllRule{allow: true})
 
 	if h.ProbeResistance != nil {
-		if !h.authRequired {
+		if h.AuthCredentials == nil {
 			return fmt.Errorf("probe resistance requires authentication")
 		}
 		if len(h.ProbeResistance.Domain) > 0 {
@@ -182,7 +200,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		}
 		h.upstream = upstreamURL
 
-		if !isLocalhost(h.upstream.Hostname()) && h.upstream.Scheme != "https" {
+		if !h.DisableInsecureUpstreamsCheck && !isLocalhost(h.upstream.Hostname()) && h.upstream.Scheme != "https" {
 			return errors.New("insecure schemes are only allowed to localhost upstreams")
 		}
 
@@ -200,7 +218,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 				// either way, it's impossible to have a legit TLS certificate for "127.0.0.1" - TODO: not true anymore
 				h.logger.Info("Localhost upstream detected, disabling verification of TLS certificate")
 				d.DialTLS = func(network string, address string) (net.Conn, string, error) {
-					conn, err := tls.Dial(network, address, &tls.Config{InsecureSkipVerify: true})
+					conn, err := tls.Dial(network, address, &tls.Config{InsecureSkipVerify: true}) // #nosec G402
 					if err != nil {
 						return nil, "", err
 					}
@@ -239,7 +257,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 
 	var authErr error
-	if h.authRequired {
+	if h.AuthCredentials != nil {
 		authErr = h.checkCredentials(r)
 	}
 	if h.ProbeResistance != nil && len(h.ProbeResistance.Domain) > 0 && reqHost == h.ProbeResistance.Domain {
@@ -288,6 +306,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			}
 		}
 
+<<<<<<< HEAD
 		// HTTP CONNECT Fast Open. We merely close the connection if Open fails.
 		wFlusher, ok := w.(http.Flusher)
 		if !ok {
@@ -295,6 +314,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 				fmt.Errorf("ResponseWriter doesn't implement http.Flusher"))
 		}
 		// Creates a padding of [30, 30+32)
+=======
+		// HTTP CONNECT Fast Open: Directly responds with a 200 OK
+		// before attempting to connect to origin to reduce response latency.
+		// We merely close the connection if Open fails.
+
+		// Creates a padding header with length in [30, 30+32)
+>>>>>>> upstream/naive
 		paddingLen := rand.Intn(32) + 30
 		padding := make([]byte, paddingLen)
 		bits := rand.Uint64()
@@ -307,8 +333,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			padding[i] = '~'
 		}
 		w.Header().Set("Padding", string(padding))
+<<<<<<< HEAD
 		w.WriteHeader(http.StatusOK)
 		wFlusher.Flush()
+=======
+
+		w.WriteHeader(http.StatusOK)
+		err := http.NewResponseController(w).Flush()
+		if err != nil {
+			return caddyhttp.Error(http.StatusInternalServerError,
+				fmt.Errorf("ResponseWriter flush error: %v", err))
+		}
+>>>>>>> upstream/naive
 
 		hostPort := r.URL.Host
 		if hostPort == "" {
@@ -372,13 +408,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			// make sure request is idempotent and could be retried by saving the Body
 			// None of those methods are supposed to have body,
 			// but we still need to copy the r.Body, even if it's empty
-			rBodyBuf, err := ioutil.ReadAll(r.Body)
+			rBodyBuf, err := io.ReadAll(r.Body)
 			if err != nil {
 				return caddyhttp.Error(http.StatusBadRequest,
 					fmt.Errorf("failed to read request body: %v", err))
 			}
 			r.GetBody = func() (io.ReadCloser, error) {
-				return ioutil.NopCloser(bytes.NewReader(rBodyBuf)), nil
+				return io.NopCloser(bytes.NewReader(rBodyBuf)), nil
 			}
 			r.Body, _ = r.GetBody()
 		}
@@ -411,7 +447,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 				fmt.Errorf("failed to read upstream response: %v", err))
 		}
 	}
-	r.Body.Close()
+	if err := r.Body.Close(); err != nil {
+		return caddyhttp.Error(http.StatusBadGateway,
+			fmt.Errorf("failed to close response body: %v", err))
+	}
 
 	if response != nil {
 		defer response.Body.Close()
@@ -433,17 +472,40 @@ func (h Handler) checkCredentials(r *http.Request) error {
 		return errors.New("Proxy-Authorization is required! Expected format: <type> <credentials>")
 	}
 	if strings.ToLower(pa[0]) != "basic" {
-		return errors.New("Auth type is not supported")
+		return errors.New("auth type is not supported")
 	}
-	for _, creds := range h.authCredentials {
+	for _, creds := range h.AuthCredentials {
 		if subtle.ConstantTimeCompare(creds, []byte(pa[1])) == 1 {
+			repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
+			buf := make([]byte, base64.StdEncoding.DecodedLen(len(creds)))
+			_, _ = base64.StdEncoding.Decode(buf, creds) // should not err ever since we are decoding a known good input
+			cred := string(buf)
+			repl.Set("http.auth.user.id", cred[:strings.IndexByte(cred, ':')])
 			// Please do not consider this to be timing-attack-safe code. Simple equality is almost
 			// mindlessly substituted with constant time algo and there ARE known issues with this code,
 			// e.g. size of smallest credentials is guessable. TODO: protect from all the attacks! Hash?
 			return nil
 		}
 	}
-	return errors.New("Invalid credentials")
+	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
+	buf := make([]byte, base64.StdEncoding.DecodedLen(len([]byte(pa[1]))))
+	n, err := base64.StdEncoding.Decode(buf, []byte(pa[1]))
+	if err != nil {
+		repl.Set("http.auth.user.id", "invalidbase64:"+err.Error())
+		return err
+	}
+	if utf8.Valid(buf[:n]) {
+		cred := string(buf[:n])
+		i := strings.IndexByte(cred, ':')
+		if i >= 0 {
+			repl.Set("http.auth.user.id", "invalid:"+cred[:i])
+		} else {
+			repl.Set("http.auth.user.id", "invalidformat:"+cred)
+		}
+	} else {
+		repl.Set("http.auth.user.id", "invalid::")
+	}
+	return errors.New("invalid credentials")
 }
 
 func (h Handler) shouldServePACFile(r *http.Request) bool {
@@ -495,6 +557,18 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 		// return nil, &proxyError{S: "port " + port + " is not allowed", Code: http.StatusForbidden}
 		return nil, caddyhttp.Error(http.StatusForbidden,
 			fmt.Errorf("port %s is not allowed", port))
+	}
+
+match:
+	for _, rule := range h.aclRules {
+		if _, ok := rule.(*aclDomainRule); ok {
+			switch rule.tryMatch(nil, host) {
+			case aclDecisionDeny:
+				return nil, caddyhttp.Error(http.StatusForbidden, fmt.Errorf("disallowed host %s", host))
+			case aclDecisionAllow:
+				break match
+			}
+		}
 	}
 
 	// in case IP was provided, net.LookupIP will simply return it
@@ -574,52 +648,33 @@ func serveHiddenPage(w http.ResponseWriter, authErr error) error {
 	if authErr != nil {
 		w.Header().Set("Proxy-Authenticate", "Basic realm=\"Caddy Secure Web Proxy\"")
 		w.WriteHeader(http.StatusProxyAuthRequired)
-		w.Write([]byte(fmt.Sprintf(hiddenPage, AuthFail)))
+		_, _ = w.Write([]byte(fmt.Sprintf(hiddenPage, AuthFail)))
 		return authErr
 	}
-	w.Write([]byte(fmt.Sprintf(hiddenPage, AuthOk)))
+	_, _ = w.Write([]byte(fmt.Sprintf(hiddenPage, AuthOk)))
 	return nil
 }
 
 // Hijacks the connection from ResponseWriter, writes the response and proxies data between targetConn
 // and hijacked connection.
 func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		return caddyhttp.Error(http.StatusInternalServerError,
-			fmt.Errorf("ResponseWriter does not implement http.Hijacker"))
-	}
-	clientConn, bufReader, err := hijacker.Hijack()
+	w.WriteHeader(http.StatusOK)
+	clientConn, brw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		return caddyhttp.Error(http.StatusInternalServerError,
 			fmt.Errorf("hijack failed: %v", err))
 	}
 	defer clientConn.Close()
 	// bufReader may contain unprocessed buffered data from the client.
-	if bufReader != nil {
-		// snippet borrowed from `proxy` plugin
-		if n := bufReader.Reader.Buffered(); n > 0 {
-			rbuf, err := bufReader.Reader.Peek(n)
-			if err != nil {
-				return caddyhttp.Error(http.StatusBadGateway, err)
-			}
-			targetConn.Write(rbuf)
-		}
+	// snippet borrowed from `proxy` plugin
+	if n := brw.Reader.Buffered(); n > 0 {
+		rbuf, _ := brw.Peek(n)
+		_, _ = targetConn.Write(rbuf)
 	}
-	// Since we hijacked the connection, we lost the ability to write and flush headers via w.
-	// Let's handcraft the response and send it manually.
-	res := &http.Response{StatusCode: http.StatusOK,
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Header:     make(http.Header),
-	}
-	res.Header.Set("Server", "Caddy")
-
-	err = res.Write(clientConn)
+	err = brw.Flush()
 	if err != nil {
 		return caddyhttp.Error(http.StatusInternalServerError,
-			fmt.Errorf("failed to send response to client: %v", err))
+			fmt.Errorf("failed to flush to client: %v", err))
 	}
 
 	return dualStream(targetConn, clientConn, clientConn, false)
@@ -638,22 +693,34 @@ const (
 func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer, padding bool) error {
 	stream := func(w io.Writer, r io.Reader, paddingType int) error {
 		// copy bytes from r to w
-		buf := bufferPool.Get().([]byte)
+		bufPtr := bufferPool.Get().(*[]byte)
+		buf := *bufPtr
 		buf = buf[0:cap(buf)]
 		_, _err := flushingIoCopy(w, r, buf, paddingType)
+<<<<<<< HEAD
 		bufferPool.Put(buf)
+=======
+		bufferPool.Put(bufPtr)
+
+>>>>>>> upstream/naive
 		if cw, ok := w.(closeWriter); ok {
-			cw.CloseWrite()
+			_ = cw.CloseWrite()
 		}
 		return _err
 	}
 	if padding {
 		go stream(target, clientReader, RemovePadding)
 		return stream(clientWriter, target, AddPadding)
+<<<<<<< HEAD
 	} else {
 		go stream(target, clientReader, NoPadding)
 		return stream(clientWriter, target, NoPadding)
 	}
+=======
+	}
+	go stream(target, clientReader, NoPadding) //nolint: errcheck
+	return stream(clientWriter, target, NoPadding)
+>>>>>>> upstream/naive
 }
 
 type closeWriter interface {
@@ -664,7 +731,15 @@ type closeWriter interface {
 // If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
 // Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
 func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (written int64, err error) {
+<<<<<<< HEAD
 	flusher, hasFlusher := dst.(http.Flusher)
+=======
+	rw, ok := dst.(http.ResponseWriter)
+	var rc *http.ResponseController
+	if ok {
+		rc = http.NewResponseController(rw)
+	}
+>>>>>>> upstream/naive
 	var numPadding int
 	for {
 		var nr int
@@ -700,15 +775,25 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (
 		}
 		if nr > 0 {
 			nw, ew := dst.Write(buf[0:nr])
+<<<<<<< HEAD
 			if hasFlusher {
 				flusher.Flush()
 			}
+=======
+>>>>>>> upstream/naive
 			if nw > 0 {
 				written += int64(nw)
 			}
 			if ew != nil {
 				err = ew
 				break
+			}
+			if rc != nil {
+				ef := rc.Flush()
+				if ef != nil {
+					err = ef
+					break
+				}
 			}
 			if nr != nw {
 				err = io.ErrShortWrite
@@ -737,10 +822,11 @@ func forwardResponse(w http.ResponseWriter, response *http.Response) error {
 	}
 	removeHopByHop(w.Header())
 	w.WriteHeader(response.StatusCode)
-	buf := bufferPool.Get().([]byte)
+	bufPtr := bufferPool.Get().(*[]byte)
+	buf := *bufPtr
 	buf = buf[0:cap(buf)]
 	_, err := io.CopyBuffer(w, response.Body, buf)
-	bufferPool.Put(buf)
+	bufferPool.Put(bufPtr)
 	return err
 }
 
@@ -776,7 +862,12 @@ function FindProxyForURL(url, host) {
 
 var bufferPool = sync.Pool{
 	New: func() interface{} {
+<<<<<<< HEAD
 		return make([]byte, 0, 64*1024)
+=======
+		buffer := make([]byte, 0, 64*1024)
+		return &buffer
+>>>>>>> upstream/naive
 	},
 }
 
@@ -798,7 +889,8 @@ type ProbeResistance struct {
 }
 
 func readLinesFromFile(filename string) ([]string, error) {
-	file, err := os.Open(filename)
+	cleanFilename := filepath.Clean(filename)
+	file, err := os.Open(cleanFilename)
 	if err != nil {
 		return nil, err
 	}
