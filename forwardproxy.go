@@ -26,10 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-<<<<<<< HEAD
-	"io/ioutil"
-=======
->>>>>>> upstream/naive
 	"math/rand"
 	"net"
 	"net/http"
@@ -306,21 +302,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			}
 		}
 
-<<<<<<< HEAD
-		// HTTP CONNECT Fast Open. We merely close the connection if Open fails.
-		wFlusher, ok := w.(http.Flusher)
-		if !ok {
-			return caddyhttp.Error(http.StatusInternalServerError,
-				fmt.Errorf("ResponseWriter doesn't implement http.Flusher"))
-		}
-		// Creates a padding of [30, 30+32)
-=======
 		// HTTP CONNECT Fast Open: Directly responds with a 200 OK
 		// before attempting to connect to origin to reduce response latency.
 		// We merely close the connection if Open fails.
 
 		// Creates a padding header with length in [30, 30+32)
->>>>>>> upstream/naive
 		paddingLen := rand.Intn(32) + 30
 		padding := make([]byte, paddingLen)
 		bits := rand.Uint64()
@@ -333,10 +319,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			padding[i] = '~'
 		}
 		w.Header().Set("Padding", string(padding))
-<<<<<<< HEAD
-		w.WriteHeader(http.StatusOK)
-		wFlusher.Flush()
-=======
 
 		w.WriteHeader(http.StatusOK)
 		err := http.NewResponseController(w).Flush()
@@ -344,7 +326,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			return caddyhttp.Error(http.StatusInternalServerError,
 				fmt.Errorf("ResponseWriter flush error: %v", err))
 		}
->>>>>>> upstream/naive
 
 		hostPort := r.URL.Host
 		if hostPort == "" {
@@ -534,13 +515,13 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 		return nil, caddyhttp.Error(http.StatusBadRequest, err)
 	}
 
-	if host == uot.UOTMagicAddress {
+	if host == uot.MagicAddress || host == uot.LegacyMagicAddress {
 		udpConn, err := net.ListenUDP("udp", nil)
 		if err != nil {
 			return nil, err
 		}
 
-		return uot.NewServerConn(udpConn), nil
+		return uot.NewServerConn(udpConn, uot.Version), nil
 	}
 
 	if h.upstream != nil {
@@ -697,12 +678,8 @@ func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Wri
 		buf := *bufPtr
 		buf = buf[0:cap(buf)]
 		_, _err := flushingIoCopy(w, r, buf, paddingType)
-<<<<<<< HEAD
-		bufferPool.Put(buf)
-=======
 		bufferPool.Put(bufPtr)
 
->>>>>>> upstream/naive
 		if cw, ok := w.(closeWriter); ok {
 			_ = cw.CloseWrite()
 		}
@@ -711,16 +688,9 @@ func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Wri
 	if padding {
 		go stream(target, clientReader, RemovePadding)
 		return stream(clientWriter, target, AddPadding)
-<<<<<<< HEAD
-	} else {
-		go stream(target, clientReader, NoPadding)
-		return stream(clientWriter, target, NoPadding)
 	}
-=======
-	}
-	go stream(target, clientReader, NoPadding) //nolint: errcheck
-	return stream(clientWriter, target, NoPadding)
->>>>>>> upstream/naive
+	go stream(target, clientReader, RemovePadding) //nolint: errcheck
+	return stream(clientWriter, target, AddPadding)
 }
 
 type closeWriter interface {
@@ -731,15 +701,11 @@ type closeWriter interface {
 // If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
 // Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
 func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (written int64, err error) {
-<<<<<<< HEAD
-	flusher, hasFlusher := dst.(http.Flusher)
-=======
 	rw, ok := dst.(http.ResponseWriter)
 	var rc *http.ResponseController
 	if ok {
 		rc = http.NewResponseController(rw)
 	}
->>>>>>> upstream/naive
 	var numPadding int
 	for {
 		var nr int
@@ -775,12 +741,6 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (
 		}
 		if nr > 0 {
 			nw, ew := dst.Write(buf[0:nr])
-<<<<<<< HEAD
-			if hasFlusher {
-				flusher.Flush()
-			}
-=======
->>>>>>> upstream/naive
 			if nw > 0 {
 				written += int64(nw)
 			}
@@ -862,12 +822,8 @@ function FindProxyForURL(url, host) {
 
 var bufferPool = sync.Pool{
 	New: func() interface{} {
-<<<<<<< HEAD
-		return make([]byte, 0, 64*1024)
-=======
 		buffer := make([]byte, 0, 64*1024)
 		return &buffer
->>>>>>> upstream/naive
 	},
 }
 
