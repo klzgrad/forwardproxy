@@ -1,14 +1,15 @@
-<<<<<<< HEAD
-# forwardproxy
-
-```shell
-go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-~/go/bin/xcaddy build --with github.com/caddyserver/forwardproxy@caddy2=github.com/sagernet/forwardproxy@latest
-```
-=======
 # Secure forward proxy for the Caddy web server
 
 This package registers the `http.handlers.forward_proxy` module, which acts as an HTTPS proxy for accessing remote networks.
+
+## :rocket: Quick Build
+
+To quickly build Caddy with this fork of forwardproxy, which includes support for sing-box UoT (UDP over TCP) v1 & v2:
+
+```shell
+go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+~/go/bin/xcaddy build --with github.com/caddyserver/forwardproxy@caddy2=github.com/aUsernameWoW/forwardproxy@naive
+```
 
 ## :warning: Experimental!
 
@@ -31,6 +32,7 @@ We are also seeking experienced maintainers who have experience with these kinds
 - Access control lists
 - Optional probe resistance
 - PAC file
+- UDP over TCP (UoT) support for sing-box clients (compatible with sing-box UoT v1 & v2)
 
 
 ## Introduction
@@ -274,4 +276,3 @@ Licensed under the [Apache License](LICENSE)
 USE AT YOUR OWN RISK. THIS IS DELIVERED AS-IS. By using this software, you agree and assert that authors, maintainers, and contributors of this software are not responsible or liable for any risks, costs, or problems you may encounter. Consider your threat model and be smart. If you find a flaw or bug, please submit a patch and help make things better!
 
 Initial version of this plugin was developed by Google. This is not an official Google product.
->>>>>>> upstream/naive
