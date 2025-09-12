@@ -515,6 +515,21 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 		return nil, caddyhttp.Error(http.StatusBadRequest, err)
 	}
 
+	// Handle UoT (UDP over TCP) connections before port validation since they use port 0
+	if host == uot.MagicAddress || host == uot.LegacyMagicAddress {
+		udpConn, err := net.ListenUDP("udp", nil)
+		if err != nil {
+			return nil, err
+		}
+
+		serverConn := uot.NewServerConn(udpConn, uot.Version)
+		if serverConn == nil {
+			udpConn.Close()
+			return nil, fmt.Errorf("failed to create UoT server connection")
+		}
+		return serverConn, nil
+	}
+
 	if h.upstream != nil {
 		// if upstreaming -- do not resolve locally nor check acl
 		conn, err = h.dialContext(ctx, network, hostPort)
@@ -543,20 +558,6 @@ match:
 		}
 	}
 
-	// Handle UoT (UDP over TCP) connections after security checks
-	if host == uot.MagicAddress || host == uot.LegacyMagicAddress {
-		udpConn, err := net.ListenUDP("udp", nil)
-		if err != nil {
-			return nil, err
-		}
-
-		serverConn := uot.NewServerConn(udpConn, uot.Version)
-		if serverConn == nil {
-			udpConn.Close()
-			return nil, fmt.Errorf("failed to create UoT server connection")
-		}
-		return serverConn, nil
-	}
 
 	// in case IP was provided, net.LookupIP will simply return it
 	IPs, err := net.LookupIP(host)
