@@ -2,15 +2,6 @@
 
 This package registers the `http.handlers.forward_proxy` module, which acts as an HTTPS proxy for accessing remote networks.
 
-## :rocket: Quick Build
-
-To quickly build Caddy with this fork of forwardproxy, which includes support for sing-box UoT (UDP over TCP) v1 & v2:
-
-```shell
-go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-~/go/bin/xcaddy build --with github.com/caddyserver/forwardproxy@caddy2=github.com/aUsernameWoW/forwardproxy@naive
-```
-
 ## :warning: Experimental!
 
 This module is EXPERIMENTAL. We need more users to test this module for bugs and weaknesses before we recommend its use from within surveilled networks or regions with active censorship. Do not rely on this code in situations where personal safety, freedom, or privacy are at risk.
@@ -32,7 +23,7 @@ We are also seeking experienced maintainers who have experience with these kinds
 - Access control lists
 - Optional probe resistance
 - PAC file
-- UDP over TCP (UoT) support for sing-box clients (compatible with sing-box UoT v1 & v2)
+- UDP over TCP (UoT) support for sing-box clients
 
 
 ## Introduction
