@@ -562,7 +562,6 @@ match:
 		}
 	}
 
-
 	// in case IP was provided, net.LookupIP will simply return it
 	IPs, err := net.LookupIP(host)
 	if err != nil {
