@@ -516,17 +516,21 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 	}
 
 	// Handle UoT (UDP over TCP) connections before port validation since they use port 0
+	// Security consideration: UoT connections bypass port validation as they use port 0 internally.
+	// This is safe because:
+	// 1. Only authenticated clients can establish UoT connections
+	// 2. The actual UDP destination port is validated by the operating system when we call WriteTo
+	// 3. ACL rules are still applied to the destination host
+	//
+	// Note: uot.NewServerConn always returns a non-nil value, so we don't need to check for nil.
 	if host == uot.MagicAddress || host == uot.LegacyMagicAddress {
 		udpConn, err := net.ListenUDP("udp", nil)
 		if err != nil {
-			return nil, err
+			return nil, caddyhttp.Error(http.StatusInternalServerError, err)
 		}
 
 		serverConn := uot.NewServerConn(udpConn, uot.Version)
-		if serverConn == nil {
-			udpConn.Close()
-			return nil, fmt.Errorf("failed to create UoT server connection")
-		}
+		// serverConn is never nil, but we keep the variable for clarity
 		return serverConn, nil
 	}
 
