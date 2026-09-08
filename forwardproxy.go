@@ -281,7 +281,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			fmt.Errorf("unsupported HTTP major version: %d", r.ProtoMajor))
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	if !h.HideIP {
 		ctxHeader := make(http.Header)
 		for k, v := range r.Header {
@@ -301,10 +301,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			}
 		}
 
-		// HTTP CONNECT Fast Open: Directly responds with a 200 OK
-		// before attempting to connect to origin to reduce response latency.
-		// We merely close the connection if Open fails.
-
 		// Creates a padding header with length in [30, 30+32)
 		paddingLen := rand.Intn(32) + 30
 		padding := make([]byte, paddingLen)
@@ -318,13 +314,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			padding[i] = '~'
 		}
 		w.Header().Set("Padding", string(padding))
-
-		w.WriteHeader(http.StatusOK)
-		err := http.NewResponseController(w).Flush()
-		if err != nil {
-			return caddyhttp.Error(http.StatusInternalServerError,
-				fmt.Errorf("ResponseWriter flush error: %v", err))
-		}
 
 		hostPort := r.URL.Host
 		if hostPort == "" {
@@ -341,6 +330,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 				fmt.Errorf("hostname %s is not allowed", r.URL.Hostname()))
 		}
 		defer targetConn.Close()
+
+		// CONNECT success confirms that the target connection is established.
+		// Flush before reading tunnel data: the client may wait for this reply.
+		w.WriteHeader(http.StatusOK)
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return caddyhttp.Error(http.StatusInternalServerError,
+				fmt.Errorf("ResponseWriter flush error: %v", err))
+		}
 
 		switch r.ProtoMajor {
 		case 1: // http1: hijack the whole flow
@@ -517,9 +514,14 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 	if h.upstream != nil {
 		// if upstreaming -- do not resolve locally nor check acl
 		conn, err = h.dialContext(ctx, network, hostPort)
+		if ctx.Err() != nil {
+			if conn != nil {
+				conn.Close()
+			}
+			return nil, tcpDialError(ctx.Err())
+		}
 		if err != nil {
-			// return conn, &proxyError{S: err.Error(), Code: http.StatusBadGateway}
-			return conn, caddyhttp.Error(http.StatusBadGateway, err)
+			return conn, tcpDialError(err)
 		}
 		return conn, nil
 	}
@@ -542,13 +544,10 @@ match:
 		}
 	}
 
-	// in case IP was provided, net.LookupIP will simply return it
-	IPs, err := net.LookupIP(host)
+	// A numeric host is returned directly without a DNS query.
+	IPs, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 	if err != nil {
-		// return nil, &proxyError{S: fmt.Sprintf("Lookup of %s failed: %v", host, err),
-		// Code: http.StatusBadGateway}
-		return nil, caddyhttp.Error(http.StatusBadGateway,
-			fmt.Errorf("lookup of %s failed: %v", host, err))
+		return nil, tcpDialError(err)
 	}
 
 	// This is net.Dial's default behavior: if the host resolves to multiple IP addresses,
@@ -557,14 +556,34 @@ match:
 		if !h.hostIsAllowed(host, ip) {
 			continue
 		}
+		if ctx.Err() != nil {
+			return nil, tcpDialError(ctx.Err())
+		}
 
 		conn, err = h.dialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if ctx.Err() != nil {
+			if conn != nil {
+				conn.Close()
+			}
+			return nil, tcpDialError(ctx.Err())
+		}
 		if err == nil {
 			return conn, nil
 		}
 	}
 
+	if err != nil {
+		return nil, tcpDialError(err)
+	}
 	return nil, caddyhttp.Error(http.StatusForbidden, fmt.Errorf("no allowed IP addresses for %s", host))
+}
+
+func tcpDialError(err error) error {
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) && netErr.Timeout() {
+		return caddyhttp.Error(http.StatusGatewayTimeout, errors.New("target connection timed out"))
+	}
+	return caddyhttp.Error(http.StatusBadGateway, errors.New("target connection failed"))
 }
 
 func (h Handler) hostIsAllowed(hostname string, ip net.IP) bool {
