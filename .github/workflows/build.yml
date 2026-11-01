@@ -1,32 +1,55 @@
+
 name: Build
+
 on:
+  workflow_call:
+    inputs:
+      repository:
+        required: false
+        type: string
+      ref:
+        required: false
+        type: string
+
   push:
     branches: [naive]
     paths-ignore: [README.md]
   release:
     types: [published]
+
 defaults:
   run:
     shell: bash
+
 jobs:
   build_caddy_with_naive:
     runs-on: ubuntu-22.04
     env:
       BUNDLE: caddy-forwardproxy-naive
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || github.sha }}
+
       - run: printf 'CADDY_VERSION=%s\n' "$(<CADDY_VERSION)" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v7
         with:
           repository: caddyserver/caddy
           ref: ${{ env.CADDY_VERSION }}
           path: .caddy-bbr
+
       - run: git -C .caddy-bbr apply "$GITHUB_WORKSPACE/caddy-sing-quic-bbrv1.patch" "$GITHUB_WORKSPACE/caddy-read-idle-timeout.patch"
-      - uses: actions/setup-go@v5
+
+      - uses: actions/setup-go@v7
         with:
           go-version: ^1.26.x
+
       - run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
       - run: ~/go/bin/xcaddy build "$CADDY_VERSION" --replace "github.com/caddyserver/caddy/v2=$GITHUB_WORKSPACE/.caddy-bbr" --with "github.com/caddyserver/forwardproxy=$GITHUB_WORKSPACE"
+
       - name: Pack naiveproxy assets
         run: |
           mkdir ${{ env.BUNDLE }}
@@ -34,12 +57,16 @@ jobs:
           tar cJf ${{ env.BUNDLE }}.tar.xz ${{ env.BUNDLE }}
           openssl sha256 ./caddy >sha256sum.txt
           echo "SHA256SUM=$(cut -d' ' -f2 sha256sum.txt)" >>$GITHUB_ENV
-      - uses: actions/upload-artifact@v4
+
+      - uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.BUNDLE }}.tar.xz caddy executable sha256 ${{ env.SHA256SUM }}
-          path: sha256sum.txt
+          name: caddy-forwardproxy-naive
+          path: |
+            ${{ env.BUNDLE }}.tar.xz
+            sha256sum.txt
+
       - name: Upload caddy assets
         if: ${{ github.event_name == 'release' }}
-        run: gh release upload "${GITHUB_REF##*/}"  ${{ env.BUNDLE }}.tar.xz --clobber
+        run: gh release upload "${GITHUB_REF##*/}" ${{ env.BUNDLE }}.tar.xz --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
